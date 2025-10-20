@@ -59,7 +59,7 @@ type SherlockDomainsProvider() =
             sprintf
                 """{
                     "name": "sherlockdomains",
-                    "version": "0.0.1",
+                    "version": "0.0.3",
                     "resources": {
                         "%s" : {
                             "properties": %s,
