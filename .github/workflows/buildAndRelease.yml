@@ -5,6 +5,9 @@ on:
   pull_request:
   schedule:
     - cron: "0 0 * * *"
+    
+env:
+  PULUMI_VERSION: 3.201.0
 
 jobs:
   bulid:
@@ -16,5 +19,11 @@ jobs:
       with:
         fetch-depth: 0
         fetch-tags: true
+    - name: Setup Pulumi CLI
+      uses: pulumi/actions@v6.2.0
+      with:
+        pulumi-version: ${{ env.PULUMI_VERSION }}        
     - name: Build
-      run: dotnet build
+      run: |
+        pulumi package gen-sdk --language dotnet .
+        dotnet build
