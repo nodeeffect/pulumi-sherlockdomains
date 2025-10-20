@@ -1,4 +1,4 @@
-name: Build
+name: Build and release
 
 on:
   push:
@@ -10,7 +10,7 @@ env:
   PULUMI_VERSION: 3.201.0
 
 jobs:
-  bulid:
+  bulidAndRelease:
     name: Build
     runs-on: ubuntu-24.04
     steps:
@@ -25,5 +25,30 @@ jobs:
         pulumi-version: ${{ env.PULUMI_VERSION }}        
     - name: Build
       run: |
-        pulumi package gen-sdk --language dotnet .
         dotnet build
+        pulumi package gen-sdk --language dotnet .
+        cd sdk/dotnet
+        dotnet build
+    - name: Create archive
+      run: zip --recurse-paths pulumi-sherlockdomains.zip ./sdk/dotnet
+    - name: Create Release
+      id: create_release
+      if: github.ref_type == 'tag'
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: ${{ github.ref }}
+        draft: false
+        prerelease: false
+    - name: Upload Release
+      if: github.ref_type == 'tag'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+        asset_path: ./pulumi-sherlockdomains.zip
+        asset_name: pulumi-sherlockdomains.zip
+        asset_content_type: application/zip
