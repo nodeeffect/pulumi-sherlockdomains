@@ -25,8 +25,12 @@ jobs:
         pulumi-version: ${{ env.PULUMI_VERSION }}        
     - name: Build
       run: |
+        # version.txt is deleted when running pulumi package gen-sdk, so back it up
+        cp sdk/dotnet/version.txt version.txt.bak
         dotnet build
         pulumi package gen-sdk --language dotnet .
+        # restore version.txt
+        mv version.txt.bak sdk/dotnet/version.txt
         cd sdk/dotnet
         dotnet build
     - name: Create archive
