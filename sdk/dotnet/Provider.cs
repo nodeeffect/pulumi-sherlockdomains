@@ -12,10 +12,6 @@ namespace Pulumi.Sherlockdomains
     [SherlockdomainsResourceType("pulumi:providers:sherlockdomains")]
     public partial class Provider : global::Pulumi.ProviderResource
     {
-        [Output("apiToken")]
-        public Output<string?> ApiToken { get; private set; } = null!;
-
-
         /// <summary>
         /// Create a Provider resource with the given unique name, arguments, and options.
         /// </summary>
@@ -43,9 +39,6 @@ namespace Pulumi.Sherlockdomains
 
     public sealed class ProviderArgs : global::Pulumi.ResourceArgs
     {
-        [Input("apiToken")]
-        public Input<string>? ApiToken { get; set; }
-
         public ProviderArgs()
         {
         }

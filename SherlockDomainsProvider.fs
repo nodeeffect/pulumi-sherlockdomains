@@ -1,5 +1,6 @@
 ﻿namespace Pulumi.SherlockDomains
 
+open System
 open System.Collections.Immutable
 open System.Linq
 open System.Net
@@ -19,6 +20,8 @@ type SherlockDomainsProvider() =
 
     static let dnsRecordResourceName = "sherlockdomains:index:DnsRecord"
     static let apiBaseUrl = "https://api.sherlockdomains.com"
+
+    static let apiTokenEnvVarName = "SHERLOCKDOMAINS_API_TOKEN"
     
     member val private ApiToken = "" with get, set
 
@@ -64,16 +67,6 @@ type SherlockDomainsProvider() =
                         }
                     },
                     "provider": {
-                        "properties": {
-                            "apiToken" : {
-                                "type": "string"
-                            }
-                        },
-                        "inputProperties": {
-                            "apiToken" : {
-                                "type": "string"
-                            }
-                        }
                     }
                 }"""
                 dnsRecordResourceName
@@ -89,11 +82,11 @@ type SherlockDomainsProvider() =
         Task.FromResult <| DiffResponse()
 
     override self.Configure (request: ConfigureRequest, ct: CancellationToken): Task<ConfigureResponse> = 
-        match request.Args.["apiToken"].TryGetString() with
-        | true, apiToken when not (System.String.IsNullOrEmpty apiToken) ->
-            self.ApiToken <- apiToken
-            Task.FromResult <| ConfigureResponse()
-        | _ -> failwith "No apiToken found"
+        let apiToken = Environment.GetEnvironmentVariable apiTokenEnvVarName
+        if String.IsNullOrWhiteSpace apiToken then
+            failwith $"Environment variable {apiTokenEnvVarName} was not found!"
+        self.ApiToken <- apiToken.Trim()
+        Task.FromResult <| ConfigureResponse()
 
     member private self.UpdateOrCreateDnsRecord(properties: ImmutableDictionary<string, PropertyValue>, ?maybeId: string): Async<string> =
         async {
