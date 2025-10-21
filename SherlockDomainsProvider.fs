@@ -24,7 +24,7 @@ type SherlockDomainsProvider() =
 
     static let apiTokenEnvVarName = "SHERLOCKDOMAINS_API_TOKEN"
 
-    static member val Version = "0.0.5"
+    static member val Version = "0.0.6"
     
     member val private ApiToken = "" with get, set
 
@@ -203,7 +203,7 @@ type SherlockDomainsProvider() =
         elif request.Type = nameServersResourceName then
             async {
                 do! self.UpdateNameServers request.Properties
-                return CreateResponse(Properties = request.Properties)
+                return CreateResponse(Id = System.Guid.NewGuid().ToString(), Properties = request.Properties)
             }
             |> Async.StartAsTask
         else
