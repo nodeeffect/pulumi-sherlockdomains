@@ -19,11 +19,12 @@ type SherlockDomainsProvider() =
     let httpClient = new HttpClient()
 
     static let dnsRecordResourceName = "sherlockdomains:index:DnsRecord"
+    static let nameServersResourceName = "sherlockdomains:index:NameServers"
     static let apiBaseUrl = "https://api.sherlockdomains.com"
 
     static let apiTokenEnvVarName = "SHERLOCKDOMAINS_API_TOKEN"
 
-    static member val Version = "0.0.4"
+    static member val Version = "0.0.5"
     
     member val private ApiToken = "" with get, set
 
@@ -58,11 +59,28 @@ type SherlockDomainsProvider() =
                                 }
                             }"""
 
+            let nameServersProperties = 
+                """{
+                                "domainId": {
+                                    "type": "string"
+                                },
+                                "servers": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }"""
+
             sprintf
                 """{
                     "name": "sherlockdomains",
                     "version": "%s",
                     "resources": {
+                        "%s" : {
+                            "properties": %s,
+                            "inputProperties": %s
+                        },
                         "%s" : {
                             "properties": %s,
                             "inputProperties": %s
@@ -75,6 +93,9 @@ type SherlockDomainsProvider() =
                 dnsRecordResourceName
                 dnsRecordProperties
                 dnsRecordProperties
+                nameServersResourceName
+                nameServersProperties
+                nameServersProperties
 
         Task.FromResult <| GetSchemaResponse(Schema = schema)
 
@@ -120,10 +141,37 @@ type SherlockDomainsProvider() =
                 return JsonDocument.Parse(responseContent).RootElement.GetProperty("records").[0].GetProperty("id").GetString()
         }
 
+    member private self.UpdateNameServers(properties: ImmutableDictionary<string, PropertyValue>): Async<unit> =
+        async {
+            let domainId = 
+                match properties.["domainId"].TryGetString() with
+                | true, value -> value
+                | false, _ -> failwith $"No domainId property in {nameServersResourceName}"
+            let servers = 
+                match properties.["servers"].TryGetArray() with
+                | true, arr -> 
+                    arr 
+                    |> Seq.map 
+                        (fun value -> 
+                            match value.TryGetString() with
+                            | true, str -> str
+                            | false, _ -> failwith $"Non-string type in servers array in {nameServersResourceName}")
+                    |> Seq.toArray
+                | false, _ -> failwith $"No servers property in {dnsRecordResourceName}"
+            
+            let uri = $"{apiBaseUrl}/api/v0/domains/{domainId}/nameservers"
+            let data = {| nameservers = servers |}
+
+            httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", self.ApiToken)
+            let! response = httpClient.PatchAsync(uri, Json.JsonContent.Create data) |> Async.AwaitTask
+            let! responseContent = response.Content.ReadAsStringAsync() |> Async.AwaitTask
+                
+            if response.StatusCode <> HttpStatusCode.OK then
+                return failwith $"SherlockDomains server returned error ({response.StatusCode}). Response: {responseContent}"
+        }
+
     override self.Check (request: CheckRequest, ct: CancellationToken): Task<CheckResponse> = 
-        if request.Type <> dnsRecordResourceName then
-            failwith $"Unknown resource type '{request.Type}'"
-        else
+        if request.Type = dnsRecordResourceName then
             let ttl = self.GetDnsRecordPropertyInt(request.NewInputs, "ttl")
             let minTtl, maxTtl = 3600, 2592001
             let failures =
@@ -132,40 +180,55 @@ type SherlockDomainsProvider() =
                 else
                     Array.empty
             Task.FromResult <| CheckResponse(Inputs = request.NewInputs, Failures = failures)
+        elif request.Type = nameServersResourceName then
+            Task.FromResult <| CheckResponse(Inputs = request.NewInputs)
+        else
+            failwith $"Unknown resource type '{request.Type}'"
 
     override self.Diff (request: DiffRequest, ct: CancellationToken): Task<DiffResponse> = 
-        if request.Type <> dnsRecordResourceName then
-            failwith $"Unknown resource type '{request.Type}'"
-        else
+        if request.Type = dnsRecordResourceName || request.Type = nameServersResourceName then
             let diff = request.NewInputs.Except request.OldInputs 
             let replaces = diff |> Seq.map (fun pair -> pair.Key) |> Seq.toArray
             Task.FromResult <| DiffResponse(Changes = (replaces.Length > 0), Replaces = replaces)
+        else
+            failwith $"Unknown resource type '{request.Type}'"
 
     override self.Create (request: CreateRequest, ct: CancellationToken): Task<CreateResponse> = 
-        if request.Type <> dnsRecordResourceName then
-            failwith $"Unknown resource type '{request.Type}'"
-        else
+        if request.Type = dnsRecordResourceName then
             async {
                 let! id = self.UpdateOrCreateDnsRecord request.Properties
                 return CreateResponse(Id = id, Properties = request.Properties)
             }
             |> Async.StartAsTask
+        elif request.Type = nameServersResourceName then
+            async {
+                do! self.UpdateNameServers request.Properties
+                return CreateResponse(Properties = request.Properties)
+            }
+            |> Async.StartAsTask
+        else
+            failwith $"Unknown resource type '{request.Type}'"
 
     override self.Update (request: UpdateRequest, ct: CancellationToken): Task<UpdateResponse> = 
-        if request.Type <> dnsRecordResourceName then
-            failwith $"Unknown resource type '{request.Type}'"
-        else
+        if request.Type = dnsRecordResourceName then
             async {
                 let properties = request.Olds.AddRange request.News
                 do! self.UpdateOrCreateDnsRecord(properties, request.Id) |> Async.Ignore<string>
                 return UpdateResponse(Properties = properties)
             }
             |> Async.StartAsTask
+        elif request.Type = nameServersResourceName then
+            async {
+                let properties = request.News
+                do! self.UpdateNameServers properties
+                return UpdateResponse(Properties = properties)
+            }
+            |> Async.StartAsTask
+        else
+            failwith $"Unknown resource type '{request.Type}'"
 
     override self.Delete (request: DeleteRequest, ct: CancellationToken): Task = 
-        if request.Type <> dnsRecordResourceName then
-            failwith $"Unknown resource type '{request.Type}'"
-        else
+        if request.Type = dnsRecordResourceName then
             async {
                 let domainId = self.GetDnsRecordPropertyString(request.Properties, "domainId")
                 httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", self.ApiToken)
@@ -180,11 +243,14 @@ type SherlockDomainsProvider() =
             }
             |> Async.StartAsTask
             :> Task
+        elif request.Type = nameServersResourceName then
+            // do nothing
+            Task.FromResult ()
+        else
+            failwith $"Unknown resource type '{request.Type}'"
 
     override self.Read (request: ReadRequest, ct: CancellationToken): Task<ReadResponse> = 
-        if request.Type <> dnsRecordResourceName then
-            failwith $"Unknown resource type '{request.Type}'"
-        else
+        if request.Type = dnsRecordResourceName then
             async {
                 let domainId = self.GetDnsRecordPropertyString(request.Properties, "domainId")
                 httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", self.ApiToken)
@@ -215,3 +281,35 @@ type SherlockDomainsProvider() =
                         return failwith $"Record with id={request.Id} not found"
             }
             |> Async.StartAsTask
+        elif request.Type = nameServersResourceName then
+            async {
+                let domainId = 
+                    match request.Properties.["domainId"].TryGetString() with
+                    | true, value -> value
+                    | false, _ -> failwith $"No domainId property in {nameServersResourceName}"
+                
+                httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", self.ApiToken)
+                let uri = $"{apiBaseUrl}/api/v0/domains/domains"
+                let! response = httpClient.GetAsync(uri) |> Async.AwaitTask
+                
+                if response.StatusCode <> HttpStatusCode.OK then
+                    return failwith $"SherlockDomains server returned error (code {response.StatusCode})"
+                else
+                    let! responseJson = response.Content.ReadAsStringAsync() |> Async.AwaitTask
+                    let records = JsonDocument.Parse(responseJson).RootElement.GetProperty("records")
+                    match records.EnumerateArray() |> Seq.tryFind(fun record -> record.GetProperty("id").GetString() = domainId) with
+                    | Some record ->
+                        let properties = 
+                            let nameservers = 
+                                [| for prop in record.GetProperty("nameservers").EnumerateArray() do
+                                       yield PropertyValue(prop.GetString()) |]
+                            dict
+                                [ "domainId", PropertyValue domainId
+                                  "nameservers", PropertyValue(ImmutableArray.Create<PropertyValue> nameservers) ]
+                        return ReadResponse(Id = request.Id, Properties = properties)
+                    | None -> 
+                        return failwith $"Domain with id={domainId} not found"
+            }
+            |> Async.StartAsTask
+        else
+            failwith $"Unknown resource type '{request.Type}'"
