@@ -22,6 +22,8 @@ type SherlockDomainsProvider() =
     static let apiBaseUrl = "https://api.sherlockdomains.com"
 
     static let apiTokenEnvVarName = "SHERLOCKDOMAINS_API_TOKEN"
+
+    static member val Version = "0.0.4"
     
     member val private ApiToken = "" with get, set
 
@@ -59,7 +61,7 @@ type SherlockDomainsProvider() =
             sprintf
                 """{
                     "name": "sherlockdomains",
-                    "version": "0.0.3",
+                    "version": "%s",
                     "resources": {
                         "%s" : {
                             "properties": %s,
@@ -69,6 +71,7 @@ type SherlockDomainsProvider() =
                     "provider": {
                     }
                 }"""
+                SherlockDomainsProvider.Version
                 dnsRecordResourceName
                 dnsRecordProperties
                 dnsRecordProperties
