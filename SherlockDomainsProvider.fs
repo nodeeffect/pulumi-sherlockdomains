@@ -13,7 +13,7 @@ open Pulumi
 open Pulumi.Experimental
 open Pulumi.Experimental.Provider
 
-type SherlockDomainsProvider() =
+type SherlockDomainsProvider(?apiToken: string) =
     inherit Pulumi.Experimental.Provider.Provider()
 
     let httpClient = new HttpClient()
@@ -24,9 +24,9 @@ type SherlockDomainsProvider() =
 
     static let apiTokenEnvVarName = "SHERLOCKDOMAINS_API_TOKEN"
 
-    static member val Version = "0.0.6"
+    static member val Version = "0.0.7"
     
-    member val private ApiToken = "" with get, set
+    member val private ApiToken = defaultArg apiToken String.Empty with get, set
 
     member private self.GetDnsRecordPropertyString(dict: ImmutableDictionary<string, PropertyValue>, name: string) =
         match dict.[name].TryGetString() with
@@ -139,6 +139,24 @@ type SherlockDomainsProvider() =
                 return failwith $"SherlockDomains server returned error ({response.StatusCode}). Response: {responseContent}"
             else
                 return JsonDocument.Parse(responseContent).RootElement.GetProperty("records").[0].GetProperty("id").GetString()
+        }
+
+    member public self.GetNameservers (domainId: string) =
+        async {
+            httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", self.ApiToken)
+            let uri = $"{apiBaseUrl}/api/v0/domains/domains"
+            let! response = httpClient.GetAsync uri |> Async.AwaitTask
+                
+            if response.StatusCode <> HttpStatusCode.OK then
+                return failwith $"SherlockDomains server returned error (code {response.StatusCode})"
+            else
+                let! responseJson = response.Content.ReadAsStringAsync() |> Async.AwaitTask
+                let records = JsonDocument.Parse(responseJson).RootElement.GetProperty("records")
+                match records.EnumerateArray() |> Seq.tryFind(fun record -> record.GetProperty("id").GetString() = domainId) with
+                | Some record ->
+                    return Seq.toArray <| record.GetProperty("nameservers").EnumerateArray()
+                | None -> 
+                    return failwith $"Domain with id={domainId} not found"
         }
 
     member private self.UpdateNameServers(properties: ImmutableDictionary<string, PropertyValue>): Async<unit> =
@@ -287,28 +305,16 @@ type SherlockDomainsProvider() =
                     match request.Properties.["domainId"].TryGetString() with
                     | true, value -> value
                     | false, _ -> failwith $"No domainId property in {nameServersResourceName}"
-                
-                httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", self.ApiToken)
-                let uri = $"{apiBaseUrl}/api/v0/domains/domains"
-                let! response = httpClient.GetAsync(uri) |> Async.AwaitTask
-                
-                if response.StatusCode <> HttpStatusCode.OK then
-                    return failwith $"SherlockDomains server returned error (code {response.StatusCode})"
-                else
-                    let! responseJson = response.Content.ReadAsStringAsync() |> Async.AwaitTask
-                    let records = JsonDocument.Parse(responseJson).RootElement.GetProperty("records")
-                    match records.EnumerateArray() |> Seq.tryFind(fun record -> record.GetProperty("id").GetString() = domainId) with
-                    | Some record ->
-                        let properties = 
-                            let nameservers = 
-                                [| for prop in record.GetProperty("nameservers").EnumerateArray() do
-                                       yield PropertyValue(prop.GetString()) |]
-                            dict
-                                [ "domainId", PropertyValue domainId
-                                  "nameservers", PropertyValue(ImmutableArray.Create<PropertyValue> nameservers) ]
-                        return ReadResponse(Id = request.Id, Properties = properties)
-                    | None -> 
-                        return failwith $"Domain with id={domainId} not found"
+
+                let! nameservers = self.GetNameservers domainId
+                let nameserversAsPropertyValues =
+                    nameservers
+                    |> Array.map (fun prop -> PropertyValue(prop.GetString()))
+                let properties =
+                    dict
+                        [ "domainId", PropertyValue domainId
+                          "nameservers", PropertyValue(ImmutableArray.Create<PropertyValue> nameserversAsPropertyValues) ]
+                return ReadResponse(Id = request.Id, Properties = properties)
             }
             |> Async.StartAsTask
         else
