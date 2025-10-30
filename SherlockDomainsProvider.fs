@@ -13,7 +13,7 @@ open Pulumi
 open Pulumi.Experimental
 open Pulumi.Experimental.Provider
 
-type SherlockDomainsProvider(?apiToken: string) as self =
+type SherlockDomainsProvider() =
     inherit Pulumi.Experimental.Provider.Provider()
 
     let httpClient = new HttpClient()
@@ -23,11 +23,6 @@ type SherlockDomainsProvider(?apiToken: string) as self =
     static let apiBaseUrl = "https://api.sherlockdomains.com"
 
     static let apiTokenEnvVarName = "SHERLOCKDOMAINS_API_TOKEN"
-
-    do
-        match apiToken with
-        | Some token -> self.ApiToken <- token
-        | None -> ()
 
     // Provider has to advertise its version when outputting schema, e.g. for SDK generation.
     // In pulumi-bitlaunch, we have Pulumi generate the terraform bridge, and it automatically pulls version from the tag.
@@ -42,7 +37,7 @@ type SherlockDomainsProvider(?apiToken: string) as self =
         use reader = new System.IO.StreamReader(stream)
         reader.ReadToEnd().Trim()
     
-    member private self.ApiToken 
+    member self.ApiToken
         with set(token: string) = 
             httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", token)
 
