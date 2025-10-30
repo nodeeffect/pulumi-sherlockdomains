@@ -166,7 +166,7 @@ type SherlockDomainsProvider() =
                 return failwith $"SherlockDomains server returned error (code {response.StatusCode})"
             else
                 let! responseJson = response.Content.ReadAsStringAsync() |> Async.AwaitTask
-                let records = JsonDocument.Parse(responseJson).RootElement.GetProperty("records")
+                let records = JsonDocument.Parse(responseJson).RootElement
                 match records.EnumerateArray() |> Seq.tryFind(fun record -> record.GetProperty("id").GetString() = domainId) with
                 | Some record ->
                     return Seq.toArray <| record.GetProperty("nameservers").EnumerateArray()
