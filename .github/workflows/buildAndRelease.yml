@@ -39,8 +39,8 @@ jobs:
       if: github.ref_type == 'tag'
       run: |
         version=$(cat sdk/dotnet/version.txt)
-        if [ "$version" != "${{ github.ref }}" ]; then
-          echo "Version in version.txt ($version) is not the same as tag (${{ github.ref }}). Aborting."
+        if [ "$version" != "${{ github.ref_name }}" ]; then
+          echo "Version in version.txt ($version) is not the same as tag (${{ github.ref_name }}). Aborting."
           exit 1
         fi
     - name: Create Release
