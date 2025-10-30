@@ -24,11 +24,17 @@ type SherlockDomainsProvider(?apiToken: string) =
 
     static let apiTokenEnvVarName = "SHERLOCKDOMAINS_API_TOKEN"
 
+    // Provider has to advertise its version when outputting schema, e.g. for SDK generation.
+    // In pulumi-bitlaunch, we have Pulumi generate the terraform bridge, and it automatically pulls version from the tag.
     static member val Version = "0.0.7"
     
     member private self.ApiToken 
         with set(token: string) = 
             httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", token)
+
+    interface IDisposable with
+        override self.Dispose (): unit = 
+            httpClient.Dispose()
 
     member private self.GetDnsRecordPropertyString(dict: ImmutableDictionary<string, PropertyValue>, name: string) =
         match dict.[name].TryGetString() with
