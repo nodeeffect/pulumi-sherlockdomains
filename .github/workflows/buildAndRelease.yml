@@ -35,6 +35,14 @@ jobs:
         dotnet build
     - name: Create archive
       run: zip --recurse-paths pulumi-sherlockdomains.zip ./* --exclude .git .github .gitignore
+    - name: Check that tag is the same as contents of version.txt
+      if: github.ref_type == 'tag'
+      run: |
+        version=$(cat sdk/dotnet/version.txt)
+        if [ "$version" != "${{ github.ref }}" ]; then
+          echo "Version in version.txt ($version) is not the same as tag (${{ github.ref }}). Aborting."
+          exit 1
+        fi
     - name: Create Release
       id: create_release
       if: github.ref_type == 'tag'
