@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="sdk/dotnet/version.txt" />
     <None Include="PulumiPlugin.yaml" />
     <Compile Include="SherlockDomainsProvider.fs" />
     <Compile Include="Program.fs" />

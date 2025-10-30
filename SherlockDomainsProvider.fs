@@ -13,7 +13,7 @@ open Pulumi
 open Pulumi.Experimental
 open Pulumi.Experimental.Provider
 
-type SherlockDomainsProvider(?apiToken: string) =
+type SherlockDomainsProvider(?apiToken: string) as self =
     inherit Pulumi.Experimental.Provider.Provider()
 
     let httpClient = new HttpClient()
@@ -24,9 +24,23 @@ type SherlockDomainsProvider(?apiToken: string) =
 
     static let apiTokenEnvVarName = "SHERLOCKDOMAINS_API_TOKEN"
 
+    do
+        match apiToken with
+        | Some token -> self.ApiToken <- token
+        | None -> ()
+
     // Provider has to advertise its version when outputting schema, e.g. for SDK generation.
     // In pulumi-bitlaunch, we have Pulumi generate the terraform bridge, and it automatically pulls version from the tag.
-    static member val Version = "0.0.7"
+    // Use sdk/dotnet/version.txt as source of version number.
+    // WARNING: that file is deleted when SDK is generated using `pulumi package gen-sdk` command; it has to be re-created.
+    static member val Version = 
+        let assembly = System.Reflection.Assembly.GetExecutingAssembly()
+        let resourceName = 
+            assembly.GetManifestResourceNames()
+            |> Seq.find (fun str -> str.EndsWith "version.txt")
+        use stream = assembly.GetManifestResourceStream resourceName
+        use reader = new System.IO.StreamReader(stream)
+        reader.ReadToEnd().Trim()
     
     member private self.ApiToken 
         with set(token: string) = 
