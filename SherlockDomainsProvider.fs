@@ -26,7 +26,9 @@ type SherlockDomainsProvider(?apiToken: string) =
 
     static member val Version = "0.0.7"
     
-    member val private ApiToken = defaultArg apiToken String.Empty with get, set
+    member private self.ApiToken 
+        with set(token: string) = 
+            httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", token)
 
     member private self.GetDnsRecordPropertyString(dict: ImmutableDictionary<string, PropertyValue>, name: string) =
         match dict.[name].TryGetString() with
@@ -131,7 +133,6 @@ type SherlockDomainsProvider(?apiToken: string) =
                     records = [ updatedRecord ]
                 |}
 
-            httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", self.ApiToken)
             let! response = httpClient.PostAsync(uri, Json.JsonContent.Create data) |> Async.AwaitTask
             let! responseContent = response.Content.ReadAsStringAsync() |> Async.AwaitTask
                 
@@ -143,7 +144,6 @@ type SherlockDomainsProvider(?apiToken: string) =
 
     member public self.AsyncGetNameservers (domainId: string) =
         async {
-            httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", self.ApiToken)
             let uri = $"{apiBaseUrl}/api/v0/domains/domains"
             let! response = httpClient.GetAsync uri |> Async.AwaitTask
                 
@@ -180,7 +180,6 @@ type SherlockDomainsProvider(?apiToken: string) =
             let uri = $"{apiBaseUrl}/api/v0/domains/{domainId}/nameservers"
             let data = {| nameservers = servers |}
 
-            httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", self.ApiToken)
             let! response = httpClient.PatchAsync(uri, Json.JsonContent.Create data) |> Async.AwaitTask
             let! responseContent = response.Content.ReadAsStringAsync() |> Async.AwaitTask
                 
@@ -247,7 +246,6 @@ type SherlockDomainsProvider(?apiToken: string) =
         async {
             if request.Type = dnsRecordResourceName then
                 let domainId = self.GetDnsRecordPropertyString(request.Properties, "domainId")
-                httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", self.ApiToken)
                 let uri = $"{apiBaseUrl}/api/v0/domains/{domainId}/dns/records/{request.Id}"
                 let! response = httpClient.DeleteAsync(uri) |> Async.AwaitTask
                 
@@ -270,7 +268,6 @@ type SherlockDomainsProvider(?apiToken: string) =
         async {
             if request.Type = dnsRecordResourceName then
                 let domainId = self.GetDnsRecordPropertyString(request.Properties, "domainId")
-                httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", self.ApiToken)
                 let uri = $"{apiBaseUrl}/api/v0/domains/{domainId}/dns/records"
                 let! response = httpClient.GetAsync(uri) |> Async.AwaitTask
                 
