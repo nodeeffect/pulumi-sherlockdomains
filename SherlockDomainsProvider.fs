@@ -157,7 +157,7 @@ type SherlockDomainsProvider() =
                 return JsonDocument.Parse(responseContent).RootElement.GetProperty("records").[0].GetProperty("id").GetString()
         }
 
-    member public self.AsyncGetNameservers (domainId: string) =
+    member private self.AsyncGetDomainRecords() =
         async {
             let uri = $"{apiBaseUrl}/api/v0/domains/domains"
             let! response = httpClient.GetAsync uri |> Async.AwaitTask
@@ -167,11 +167,27 @@ type SherlockDomainsProvider() =
             else
                 let! responseJson = response.Content.ReadAsStringAsync() |> Async.AwaitTask
                 let records = JsonDocument.Parse(responseJson).RootElement
-                match records.EnumerateArray() |> Seq.tryFind(fun record -> record.GetProperty("id").GetString() = domainId) with
-                | Some record ->
-                    return Seq.toArray <| record.GetProperty("nameservers").EnumerateArray()
-                | None -> 
-                    return failwith $"Domain with id={domainId} not found"
+                return Seq.toArray <| records.EnumerateArray()
+        }
+
+    member public self.AsyncGetNameservers (domainId: string) =
+        async {
+            let! records = self.AsyncGetDomainRecords()
+            match records |> Seq.tryFind(fun record -> record.GetProperty("id").GetString() = domainId) with
+            | Some record ->
+                return Seq.toArray <| record.GetProperty("nameservers").EnumerateArray()
+            | None -> 
+                return failwith $"Domain with id={domainId} not found"
+        }
+
+    member public self.AsyncTryFindDomainId (domainName: string) =
+        async {
+            let! records = self.AsyncGetDomainRecords()
+            match records |> Seq.tryFind(fun record -> record.GetProperty("domain_name").GetString() = domainName) with
+            | Some record ->
+                return Some <| record.GetProperty("id").GetString()
+            | None -> 
+                return None
         }
 
     member private self.AsyncUpdateNameServers(properties: ImmutableDictionary<string, PropertyValue>): Async<unit> =
