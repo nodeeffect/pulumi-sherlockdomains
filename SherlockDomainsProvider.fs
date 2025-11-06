@@ -16,7 +16,7 @@ open Pulumi
 open Pulumi.Experimental
 open Pulumi.Experimental.Provider
 
-type SherlockDomainsProvider() =
+type SherlockDomainsProvider(apiToken: string) =
     inherit Pulumi.Experimental.Provider.Provider()
 
     let httpClient = new HttpClient()
@@ -25,8 +25,8 @@ type SherlockDomainsProvider() =
     static let nameServersResourceName = "sherlockdomains:index:NameServers"
     static let apiBaseUrl = "https://api.sherlockdomains.com"
 
-    static let apiTokenEnvVarName = "SHERLOCKDOMAINS_API_TOKEN"
-    static let privateKeyEnvVarName = "SHERLOCKDOMAINS_PRIVATE_KEY"
+    do
+        httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", apiToken)
 
     // Provider has to advertise its version when outputting schema, e.g. for SDK generation.
     // In pulumi-bitlaunch, we have Pulumi generate the terraform bridge, and it automatically pulls version from the tag.
@@ -40,10 +40,9 @@ type SherlockDomainsProvider() =
         use stream = assembly.GetManifestResourceStream resourceName
         use reader = new System.IO.StreamReader(stream)
         reader.ReadToEnd().Trim()
-    
-    member self.ApiToken
-        with set(token: string) = 
-            httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", token)
+
+    static member val ApiTokenEnvVarName = "SHERLOCKDOMAINS_API_TOKEN"
+    static member val PrivateKeyEnvVarName = "SHERLOCKDOMAINS_PRIVATE_KEY"
 
     interface IDisposable with
         override self.Dispose (): unit = 
@@ -126,26 +125,18 @@ type SherlockDomainsProvider() =
     override self.DiffConfig (request: DiffRequest, ct: CancellationToken): Task<DiffResponse> = 
         Task.FromResult <| DiffResponse()
 
-    member private self.AsyncConfigure() = 
-        async {
-            let privKey = Environment.GetEnvironmentVariable privateKeyEnvVarName
-            let! apiToken = 
-                if not <| String.IsNullOrWhiteSpace privKey then
-                    self.Authenticate privKey
-                else
-                    let token = Environment.GetEnvironmentVariable apiTokenEnvVarName
-                    if String.IsNullOrWhiteSpace token then
-                        failwith $"Neither {privateKeyEnvVarName} nor {apiTokenEnvVarName} environment variable found!"
-                    async { return token }
-            self.ApiToken <- apiToken.Trim()
-            return ConfigureResponse()
-        }
-
     override self.Configure (request: ConfigureRequest, ct: CancellationToken): Task<ConfigureResponse> = 
-        self.AsyncConfigure() |> Async.StartAsTask
+        if String.IsNullOrWhiteSpace apiToken then
+            failwithf
+                "Neither %s nor %s environment variable found!"
+                SherlockDomainsProvider.PrivateKeyEnvVarName
+                SherlockDomainsProvider.ApiTokenEnvVarName
+        Task.FromResult <| ConfigureResponse()
 
-    member private self.Authenticate(privKeyHex: string): Async<string> =
+    static member public Authenticate(privKeyHex: string): Async<string> =
         async {
+            use httpClient = new HttpClient()
+
             let privateKeyParam = new Ed25519PrivateKeyParameters(Hex.DecodeStrict privKeyHex)
             let publicKeyParam = privateKeyParam.GeneratePublicKey()
 
@@ -182,12 +173,6 @@ type SherlockDomainsProvider() =
                 }
 
             return accessToken
-        }
-
-    static member public Authenticate(privKeyHex: string): Async<string> =
-        async {
-            use provider = new SherlockDomainsProvider()
-            return! provider.Authenticate privKeyHex
         }
 
     member private self.AsyncUpdateOrCreateDnsRecord(properties: ImmutableDictionary<string, PropertyValue>, ?maybeId: string): Async<string> =
