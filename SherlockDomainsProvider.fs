@@ -9,11 +9,14 @@ open System.Threading
 open System.Threading.Tasks
 open System.Text.Json
 
+open Org.BouncyCastle.Crypto.Parameters
+open Org.BouncyCastle.Utilities.Encoders
+open Org.BouncyCastle.Security
 open Pulumi
 open Pulumi.Experimental
 open Pulumi.Experimental.Provider
 
-type SherlockDomainsProvider() =
+type SherlockDomainsProvider(apiToken: string) =
     inherit Pulumi.Experimental.Provider.Provider()
 
     let httpClient = new HttpClient()
@@ -22,7 +25,8 @@ type SherlockDomainsProvider() =
     static let nameServersResourceName = "sherlockdomains:index:NameServers"
     static let apiBaseUrl = "https://api.sherlockdomains.com"
 
-    static let apiTokenEnvVarName = "SHERLOCKDOMAINS_API_TOKEN"
+    do
+        httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", apiToken)
 
     // Provider has to advertise its version when outputting schema, e.g. for SDK generation.
     // In pulumi-bitlaunch, we have Pulumi generate the terraform bridge, and it automatically pulls version from the tag.
@@ -36,10 +40,9 @@ type SherlockDomainsProvider() =
         use stream = assembly.GetManifestResourceStream resourceName
         use reader = new System.IO.StreamReader(stream)
         reader.ReadToEnd().Trim()
-    
-    member self.ApiToken
-        with set(token: string) = 
-            httpClient.DefaultRequestHeaders.Authorization <- Headers.AuthenticationHeaderValue("Bearer", token)
+
+    static member val ApiTokenEnvVarName = "SHERLOCKDOMAINS_API_TOKEN"
+    static member val PrivateKeyEnvVarName = "SHERLOCKDOMAINS_PRIVATE_KEY"
 
     interface IDisposable with
         override self.Dispose (): unit = 
@@ -123,11 +126,54 @@ type SherlockDomainsProvider() =
         Task.FromResult <| DiffResponse()
 
     override self.Configure (request: ConfigureRequest, ct: CancellationToken): Task<ConfigureResponse> = 
-        let apiToken = Environment.GetEnvironmentVariable apiTokenEnvVarName
         if String.IsNullOrWhiteSpace apiToken then
-            failwith $"Environment variable {apiTokenEnvVarName} was not found!"
-        self.ApiToken <- apiToken.Trim()
+            failwithf
+                "Neither %s nor %s environment variable found!"
+                SherlockDomainsProvider.PrivateKeyEnvVarName
+                SherlockDomainsProvider.ApiTokenEnvVarName
         Task.FromResult <| ConfigureResponse()
+
+    static member public Authenticate(privKeyHex: string): Async<string> =
+        async {
+            use httpClient = new HttpClient()
+
+            let privateKeyParam = new Ed25519PrivateKeyParameters(Hex.DecodeStrict privKeyHex)
+            let publicKeyParam = privateKeyParam.GeneratePublicKey()
+
+            let! challenge =
+                async {
+                    let data = {| public_key = Hex.ToHexString <| publicKeyParam.GetEncoded() |}
+                    let! response = 
+                        httpClient.PostAsync($"{apiBaseUrl}/api/v0/auth/challenge", Json.JsonContent.Create data) 
+                        |> Async.AwaitTask
+                    let! responseBody = response.Content.ReadAsStringAsync() |> Async.AwaitTask
+                    let responseJson = JsonDocument.Parse responseBody
+                    return Hex.DecodeStrict <| responseJson.RootElement.GetProperty("challenge").GetString()
+                }
+
+            let signer = SignerUtilities.GetSigner "Ed25519"
+            signer.Init(true, privateKeyParam)
+            signer.BlockUpdate(challenge, 0, challenge.Length)
+            let signature = signer.GenerateSignature()
+
+            let! accessToken =
+                async {
+                    let data = 
+                        {| 
+                            public_key = Hex.ToHexString <| publicKeyParam.GetEncoded() 
+                            challenge = Hex.ToHexString challenge
+                            signature = Hex.ToHexString signature
+                        |}
+                    let! response = 
+                        httpClient.PostAsync($"{apiBaseUrl}/api/v0/auth/login", Json.JsonContent.Create data) 
+                        |> Async.AwaitTask
+                    let! responseBody = response.Content.ReadAsStringAsync() |> Async.AwaitTask
+                    let responseJson = JsonDocument.Parse responseBody
+                    return responseJson.RootElement.GetProperty("access").GetString()
+                }
+
+            return accessToken
+        }
 
     member private self.AsyncUpdateOrCreateDnsRecord(properties: ImmutableDictionary<string, PropertyValue>, ?maybeId: string): Async<string> =
         async {
