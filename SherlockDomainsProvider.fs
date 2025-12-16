@@ -328,12 +328,17 @@ type SherlockDomainsProvider(apiToken: string) =
                 
                 if response.StatusCode <> HttpStatusCode.OK then
                     let! responseContent = response.Content.ReadAsStringAsync() |> Async.AwaitTask
-                    return failwith $"SherlockDomains server returned error ({response.StatusCode}). Response: {responseContent}"
+                    eprintfn "Failed to delete %s with id=%s in domain with domainId=%s" request.Type request.Id domainId
+                    let errorMessage = $"SherlockDomains server returned error ({response.StatusCode}). Response: {responseContent}"
+                    if responseContent.Contains "record_id missing" then
+                        eprintfn "%s" errorMessage
+                    else
+                        failwith errorMessage
                 else
-                    return ()
+                    ()
             elif request.Type = nameServersResourceName then
                 // do nothing
-                return ()
+                ()
             else
                 failwith $"Unknown resource type '{request.Type}'"
         }
